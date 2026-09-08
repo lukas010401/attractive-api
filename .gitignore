@@ -1,0 +1,11 @@
+﻿bin/
+obj/
+.vs/
+build-check/
+*.user
+*.suo
+*.log
+.env
+.env.*
+wwwroot/uploads/
+appsettings.Development.json
