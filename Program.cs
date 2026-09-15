@@ -132,11 +132,13 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     var passwordService = scope.ServiceProvider.GetRequiredService<IPasswordService>();
+    var imageStorage = scope.ServiceProvider.GetRequiredService<IProductImageStorage>();
 
     if (dbContext.Database.IsRelational()) await dbContext.Database.MigrateAsync();
     else await dbContext.Database.EnsureCreatedAsync();
 
     await DbSeeder.SeedAsync(dbContext, app.Configuration, passwordService);
+    await BackfillProductImageCardsAsync(dbContext, imageStorage);
 }
 
 if (app.Environment.IsDevelopment())
@@ -147,7 +149,16 @@ if (app.Environment.IsDevelopment())
 
 app.UseForwardedHeaders();
 app.UseHttpsRedirection();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (context.File.PhysicalPath?.Contains($"{Path.DirectorySeparatorChar}uploads{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            context.Context.Response.Headers.CacheControl = "public,max-age=2592000,immutable";
+        }
+    }
+});
 app.UseCors("Frontend");
 app.UseRateLimiter();
 app.UseAuthentication();
@@ -155,7 +166,26 @@ app.UseAuthorization();
 app.MapControllers();
 app.Run();
 
+static async Task BackfillProductImageCardsAsync(AppDbContext dbContext, IProductImageStorage imageStorage)
+{
+    var images = await dbContext.ProductImages
+        .Where(x => x.CardUrl == null || x.CardStorageKey == null)
+        .ToListAsync();
+
+    foreach (var image in images)
+    {
+        var card = await imageStorage.GenerateCardVariantAsync(image.StorageKey, CancellationToken.None);
+        if (card is null) continue;
+
+        image.CardUrl = card.Url;
+        image.CardStorageKey = card.StorageKey;
+    }
+
+    if (images.Count > 0) await dbContext.SaveChangesAsync();
+}
+
 public partial class Program;
+
 
 
 

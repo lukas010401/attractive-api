@@ -52,7 +52,7 @@ public sealed class PublicProductsController(AppDbContext dbContext) : Controlle
                 x.Category.Slug,
                 x.Brand == null ? null : x.Brand.Name,
                 x.Brand == null ? null : x.Brand.Slug,
-                x.Images.OrderByDescending(i => i.IsPrimary).ThenBy(i => i.DisplayOrder).Select(i => i.Url).FirstOrDefault(),
+                x.Images.OrderByDescending(i => i.IsPrimary).ThenBy(i => i.DisplayOrder).Select(i => i.CardUrl ?? i.Url).FirstOrDefault(),
                 x.IsFeatured))
             .ToListAsync(cancellationToken);
 

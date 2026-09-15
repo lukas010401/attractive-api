@@ -47,7 +47,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
                 x.Status.ToString(),
                 x.Category == null ? string.Empty : x.Category.Name,
                 x.Brand == null ? null : x.Brand.Name,
-                x.Images.OrderByDescending(i => i.IsPrimary).ThenBy(i => i.DisplayOrder).Select(i => i.Url).FirstOrDefault(),
+                x.Images.OrderByDescending(i => i.IsPrimary).ThenBy(i => i.DisplayOrder).Select(i => i.CardUrl ?? i.Url).FirstOrDefault(),
                 x.IsFeatured))
             .ToListAsync(cancellationToken);
 
@@ -140,6 +140,8 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
             ProductId = id,
             Url = image.Url,
             StorageKey = image.StorageKey,
+            CardUrl = image.CardUrl,
+            CardStorageKey = image.CardStorageKey,
             DisplayOrder = nextOrder + index,
             IsPrimary = shouldSetPrimary && index == 0
         }).ToList();
@@ -165,7 +167,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
         if (image is null) return NotFound();
 
         dbContext.ProductImages.Remove(image);
-        await imageStorage.DeleteAsync(image.StorageKey, cancellationToken);
+        await imageStorage.DeleteAsync(image.StorageKey, image.CardStorageKey, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return NoContent();
     }

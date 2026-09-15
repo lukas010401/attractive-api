@@ -87,6 +87,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(x => x.ProductId);
             entity.Property(x => x.Url).HasMaxLength(500);
             entity.Property(x => x.StorageKey).HasMaxLength(300);
+            entity.Property(x => x.CardUrl).HasMaxLength(500);
+            entity.Property(x => x.CardStorageKey).HasMaxLength(300);
             entity.HasOne(x => x.Product).WithMany(x => x.Images).HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Cascade);
         });
 
