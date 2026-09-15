@@ -10,8 +10,11 @@ namespace AttractiveCatalog.Api.Controllers;
 public sealed class PublicProductsController(AppDbContext dbContext) : ControllerBase
 {
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? q, [FromQuery] string? category, [FromQuery] string? brand, [FromQuery] bool? featured, CancellationToken cancellationToken)
+    public async Task<IActionResult> List([FromQuery] string? q, [FromQuery] string? category, [FromQuery] string? brand, [FromQuery] bool? featured, [FromQuery] int page = 1, [FromQuery] int pageSize = 8, CancellationToken cancellationToken = default)
     {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 50);
+
         var query = dbContext.Products.AsNoTracking()
             .Where(x => x.Status == ProductStatus.Published)
             .Include(x => x.Category)
@@ -29,9 +32,13 @@ public sealed class PublicProductsController(AppDbContext dbContext) : Controlle
         if (!string.IsNullOrWhiteSpace(brand)) query = query.Where(x => x.Brand != null && x.Brand.Slug == brand);
         if (featured.HasValue) query = query.Where(x => x.IsFeatured == featured.Value);
 
+        var totalCount = await query.CountAsync(cancellationToken);
+
         var products = await query
             .OrderByDescending(x => x.IsFeatured)
             .ThenByDescending(x => x.PublishedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
             .Select(x => new ProductListItemResponse(
                 x.Id,
                 x.Name,
@@ -49,7 +56,7 @@ public sealed class PublicProductsController(AppDbContext dbContext) : Controlle
                 x.IsFeatured))
             .ToListAsync(cancellationToken);
 
-        return Ok(products);
+        return Ok(new PaginatedResponse<ProductListItemResponse>(products, totalCount, page, pageSize));
     }
 
     [HttpGet("{slug}")]
@@ -96,4 +103,3 @@ public sealed record ProductListItemResponse(Guid Id, string Name, string Slug, 
 public sealed record ProductDetailResponse(Guid Id, string Name, string Slug, string ShortDescription, string Description, decimal Price, decimal? CompareAtPrice, string Currency, int StockQuantity, string? Sku, string CategoryName, string CategorySlug, string? BrandName, string? BrandSlug, IReadOnlyList<ProductImageResponse> Images, IReadOnlyList<ProductSpecificationResponse> Specifications);
 public sealed record ProductImageResponse(Guid Id, string Url, bool IsPrimary, int DisplayOrder);
 public sealed record ProductSpecificationResponse(Guid Id, string Name, string Value, int DisplayOrder);
-
