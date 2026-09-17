@@ -1,4 +1,4 @@
-﻿using AttractiveCatalog.Api.Domain.Entities;
+using AttractiveCatalog.Api.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace AttractiveCatalog.Api.Infrastructure.Persistence;
@@ -56,6 +56,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(x => x.Slug).IsUnique();
             entity.Property(x => x.Name).HasMaxLength(120);
             entity.Property(x => x.Slug).HasMaxLength(140);
+            entity.Property(x => x.LogoUrl).HasMaxLength(500);
+            entity.Property(x => x.LogoStorageKey).HasMaxLength(300);
         });
 
         modelBuilder.Entity<Product>(entity =>

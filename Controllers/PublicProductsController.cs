@@ -1,4 +1,4 @@
-﻿using AttractiveCatalog.Api.Domain.Enums;
+using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -94,7 +94,7 @@ public sealed class PublicProductsController(AppDbContext dbContext) : Controlle
     public async Task<IActionResult> Metadata(CancellationToken cancellationToken)
     {
         var categories = await dbContext.Categories.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.DisplayOrder).Select(x => new { x.Id, x.Name, x.Slug }).ToListAsync(cancellationToken);
-        var brands = await dbContext.Brands.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.Slug }).ToListAsync(cancellationToken);
+        var brands = await dbContext.Brands.AsNoTracking().Where(x => x.IsActive).OrderBy(x => x.Name).Select(x => new { x.Id, x.Name, x.Slug, x.LogoUrl }).ToListAsync(cancellationToken);
         return Ok(new { categories, brands });
     }
 }

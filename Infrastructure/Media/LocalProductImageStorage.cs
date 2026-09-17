@@ -1,4 +1,4 @@
-﻿using AttractiveCatalog.Api.Infrastructure.Config;
+using AttractiveCatalog.Api.Infrastructure.Config;
 using Microsoft.Extensions.Options;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Webp;
@@ -50,6 +50,32 @@ public sealed class LocalProductImageStorage(IWebHostEnvironment environment, IO
         }
 
         return stored;
+    }
+
+    public async Task<StoredBrandLogo> SaveBrandLogoAsync(Guid brandId, IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file.Length <= 0) throw new InvalidOperationException("Logo file is empty.");
+
+        var allowedExtensions = new HashSet<string>(_options.AllowedExtensions, StringComparer.OrdinalIgnoreCase);
+        var maxBytes = _options.MaxImageSizeMb * 1024L * 1024L;
+        if (file.Length > maxBytes) throw new InvalidOperationException($"Logo {file.FileName} exceeds {_options.MaxImageSizeMb} MB.");
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!allowedExtensions.Contains(extension)) throw new InvalidOperationException($"Unsupported image format: {extension}.");
+
+        var relativeFolder = Path.Combine("uploads", "brands", brandId.ToString("N"));
+        var absoluteFolder = Path.Combine(environment.ContentRootPath, "wwwroot", relativeFolder);
+        Directory.CreateDirectory(absoluteFolder);
+
+        var fileName = $"{Guid.NewGuid():N}{extension}";
+        var absolutePath = Path.Combine(absoluteFolder, fileName);
+        await using (var stream = File.Create(absolutePath))
+        {
+            await file.CopyToAsync(stream, cancellationToken);
+        }
+
+        var storageKey = Path.Combine(relativeFolder, fileName).Replace('\\', '/');
+        return new StoredBrandLogo($"/{storageKey}", storageKey);
     }
 
     public async Task<StoredProductImageVariant?> GenerateCardVariantAsync(string storageKey, CancellationToken cancellationToken)
