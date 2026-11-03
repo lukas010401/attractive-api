@@ -1,6 +1,7 @@
 ﻿using AttractiveCatalog.Api.Domain.Entities;
 using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Media;
+using AttractiveCatalog.Api.Infrastructure.Catalog;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
 using AttractiveCatalog.Api.Infrastructure.Text;
 using Microsoft.AspNetCore.Authorization;
@@ -12,7 +13,7 @@ namespace AttractiveCatalog.Api.Controllers;
 [ApiController]
 [Authorize(Policy = "AdminPolicy")]
 [Route("api/admin/products")]
-public sealed class AdminProductsController(AppDbContext dbContext, IProductImageStorage imageStorage) : ControllerBase
+public sealed class AdminProductsController(AppDbContext dbContext, IProductImageStorage imageStorage, ProductShowcaseCache showcaseCache) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 8, CancellationToken cancellationToken = default)
@@ -78,6 +79,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
 
         dbContext.Products.Add(product);
         await dbContext.SaveChangesAsync(cancellationToken);
+        showcaseCache.Invalidate();
 
         var detail = await BuildProductDetailAsync(product.Id, cancellationToken);
         return detail is null ? NotFound() : Ok(detail);
@@ -111,6 +113,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
         dbContext.ProductSpecifications.AddRange(specifications);
         await dbContext.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+        showcaseCache.Invalidate();
 
         var detail = await BuildProductDetailAsync(product.Id, cancellationToken);
         return detail is null ? NotFound() : Ok(detail);
@@ -148,6 +151,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
 
         dbContext.ProductImages.AddRange(productImages);
         await dbContext.SaveChangesAsync(cancellationToken);
+        showcaseCache.Invalidate();
 
         var images = await dbContext.ProductImages
             .AsNoTracking()
@@ -169,6 +173,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
         dbContext.ProductImages.Remove(image);
         await imageStorage.DeleteAsync(image.StorageKey, image.CardStorageKey, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        showcaseCache.Invalidate();
         return NoContent();
     }
 
@@ -181,6 +186,7 @@ public sealed class AdminProductsController(AppDbContext dbContext, IProductImag
         product.Status = product.StockQuantity > 0 ? ProductStatus.Published : ProductStatus.OutOfStock;
         product.PublishedAt ??= DateTime.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+        showcaseCache.Invalidate();
 
         var detail = await BuildProductDetailAsync(product.Id, cancellationToken);
         return detail is null ? NotFound() : Ok(detail);

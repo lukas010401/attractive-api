@@ -1,5 +1,6 @@
 using AttractiveCatalog.Api.Domain.Entities;
 using AttractiveCatalog.Api.Infrastructure.Media;
+using AttractiveCatalog.Api.Infrastructure.Catalog;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
 using AttractiveCatalog.Api.Infrastructure.Text;
 using Microsoft.AspNetCore.Authorization;
@@ -11,7 +12,7 @@ namespace AttractiveCatalog.Api.Controllers;
 [ApiController]
 [Authorize(Policy = "AdminPolicy")]
 [Route("api/admin/metadata")]
-public sealed class AdminMetadataController(AppDbContext dbContext, IProductImageStorage imageStorage) : ControllerBase
+public sealed class AdminMetadataController(AppDbContext dbContext, IProductImageStorage imageStorage, ProductShowcaseCache showcaseCache) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken cancellationToken)
@@ -105,6 +106,7 @@ public sealed class AdminMetadataController(AppDbContext dbContext, IProductImag
         brand.Slug = string.IsNullOrWhiteSpace(request.Slug) ? SlugHelper.Generate(request.Name) : SlugHelper.Generate(request.Slug);
         brand.IsActive = request.IsActive;
         await dbContext.SaveChangesAsync(cancellationToken);
+        showcaseCache.Invalidate();
         return Ok(new BrandResponse(brand.Id, brand.Name, brand.Slug, brand.IsActive, brand.LogoUrl));
     }
 

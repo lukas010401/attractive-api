@@ -1,5 +1,6 @@
 ﻿using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Config;
+using AttractiveCatalog.Api.Infrastructure.Catalog;
 using AttractiveCatalog.Api.Infrastructure.Media;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
 using AttractiveCatalog.Api.Infrastructure.Security;
@@ -55,6 +56,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IProductImageStorage, LocalProductImageStorage>();
+builder.Services.AddSingleton<ProductShowcaseCache>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

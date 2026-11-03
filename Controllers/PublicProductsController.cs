@@ -1,5 +1,6 @@
 using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
+using AttractiveCatalog.Api.Infrastructure.Catalog;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,10 +8,43 @@ namespace AttractiveCatalog.Api.Controllers;
 
 [ApiController]
 [Route("api/products")]
-public sealed class PublicProductsController(AppDbContext dbContext) : ControllerBase
+public sealed class PublicProductsController(AppDbContext dbContext, ProductShowcaseCache showcaseCache) : ControllerBase
 {
+    [HttpGet("showcase")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Showcase(CancellationToken cancellationToken)
+    {
+        var products = await showcaseCache.GetAsync(async token =>
+        {
+            var query = dbContext.Products.AsNoTracking()
+                .Where(product => product.Status == ProductStatus.Published
+                    && product.StockQuantity > 0
+                    && product.Images.Any(image => image.Url != string.Empty));
+
+            var randomizedQuery = dbContext.Database.IsRelational()
+                ? query.OrderBy(product => EF.Functions.Random())
+                : query.OrderBy(product => Guid.NewGuid());
+
+            return await randomizedQuery.Take(3)
+                .Select(product => new ProductShowcaseItem(
+                    product.Id,
+                    product.Name,
+                    product.Slug,
+                    product.Brand == null ? null : product.Brand.Name,
+                    product.Images.Where(image => image.Url != string.Empty)
+                        .OrderByDescending(image => image.IsPrimary)
+                        .ThenBy(image => image.DisplayOrder)
+                        .ThenBy(image => image.Id)
+                        .Select(image => image.CardUrl ?? image.Url)
+                        .FirstOrDefault()!))
+                .ToListAsync(token);
+        }, cancellationToken);
+
+        return Ok(products);
+    }
+
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] string? q, [FromQuery] string? category, [FromQuery] string? brand, [FromQuery] bool? featured, [FromQuery] int page = 1, [FromQuery] int pageSize = 8, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> List([FromQuery] string? q, [FromQuery] string? category, [FromQuery] string? brand, [FromQuery] bool? featured, [FromQuery] int page = 1, [FromQuery] int pageSize = 8, [FromQuery] string? sort = null, CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 50);
@@ -34,9 +68,15 @@ public sealed class PublicProductsController(AppDbContext dbContext) : Controlle
 
         var totalCount = await query.CountAsync(cancellationToken);
 
-        var products = await query
-            .OrderByDescending(x => x.IsFeatured)
-            .ThenByDescending(x => x.PublishedAt)
+        var orderedQuery = sort switch
+        {
+            "price-asc" => query.OrderBy(x => x.Price),
+            "price-desc" => query.OrderByDescending(x => x.Price),
+            _ => query.OrderByDescending(x => x.IsFeatured).ThenByDescending(x => x.PublishedAt)
+        };
+
+        var products = await orderedQuery
+            .ThenBy(x => x.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(x => new ProductListItemResponse(
