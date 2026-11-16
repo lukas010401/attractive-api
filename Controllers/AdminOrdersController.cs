@@ -1,5 +1,7 @@
 ﻿using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
+using AttractiveCatalog.Api.Domain;
+using AttractiveCatalog.Api.Infrastructure.Catalog;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +11,7 @@ namespace AttractiveCatalog.Api.Controllers;
 [ApiController]
 [Authorize(Policy = "AdminPolicy")]
 [Route("api/admin/orders")]
-public sealed class AdminOrdersController(AppDbContext dbContext) : ControllerBase
+public sealed class AdminOrdersController(AppDbContext dbContext, ProductShowcaseCache showcaseCache) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] string? status, [FromQuery] string? search, [FromQuery] int page = 1, [FromQuery] int pageSize = 8, CancellationToken cancellationToken = default)
@@ -50,13 +52,68 @@ public sealed class AdminOrdersController(AppDbContext dbContext) : ControllerBa
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateOrderStatusRequest request, CancellationToken cancellationToken)
     {
-        if (!Enum.TryParse<OrderStatus>(request.Status, true, out var status)) return BadRequest("Invalid order status.");
+        if (!Enum.TryParse<OrderStatus>(request.Status, true, out var status) || !Enum.IsDefined(status))
+        {
+            return BadRequest(new { message = "Le statut de commande est invalide." });
+        }
 
-        var order = await dbContext.Orders.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
+
+        var order = await OrderStockQueries.LoadOrderForUpdateAsync(dbContext, id, cancellationToken);
         if (order is null) return NotFound();
 
-        order.Status = status;
-        await dbContext.SaveChangesAsync(cancellationToken);
+        var statusChanged = order.Status != status;
+        if (statusChanged)
+        {
+            if (request.ExpectedStatus is not null
+                && (!Enum.TryParse<OrderStatus>(request.ExpectedStatus, true, out var expectedStatus) || expectedStatus != order.Status))
+            {
+                return Conflict(new { message = "Le statut a été modifié entre-temps. La commande doit être actualisée avant de continuer." });
+            }
+
+            if (!OrderStatusTransitions.AllowedNextStatuses(order.Status).Contains(status))
+            {
+                return Conflict(new { message = "Ce changement de statut n’est plus autorisé pour cette commande." });
+            }
+
+            if (status == OrderStatus.Cancelled)
+            {
+                if (order.Status == OrderStatus.OutForDelivery && !request.ItemsReturned)
+                {
+                    return BadRequest(new { message = "Confirmez le retour de tous les articles avant d’annuler une commande en livraison." });
+                }
+
+                var items = await dbContext.OrderItems.AsNoTracking()
+                    .Where(item => item.OrderId == id)
+                    .GroupBy(item => item.ProductId)
+                    .Select(group => new { ProductId = group.Key, Quantity = group.Sum(item => item.Quantity) })
+                    .ToListAsync(cancellationToken);
+
+                var products = await OrderStockQueries.LoadProductsForUpdateAsync(dbContext, items.Select(item => item.ProductId).ToArray(), cancellationToken);
+                if (products.Count != items.Count || items.Any(item => item.Quantity <= 0))
+                {
+                    return Conflict(new { message = "Les articles de la commande ne permettent pas une remise en stock automatique. Vérifiez la commande." });
+                }
+
+                var quantities = items.ToDictionary(item => item.ProductId, item => item.Quantity);
+                foreach (var product in products)
+                {
+                    product.StockQuantity = checked(product.StockQuantity + quantities[product.Id]);
+                    if (product.Status == ProductStatus.OutOfStock && product.StockQuantity > 0)
+                    {
+                        product.Status = ProductStatus.Published;
+                    }
+                }
+            }
+
+            order.Status = status;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        if (statusChanged && status == OrderStatus.Cancelled) showcaseCache.Invalidate();
 
         var detail = await BuildOrderDetailAsync(id, cancellationToken);
         return detail is null ? NotFound() : Ok(detail);
@@ -75,7 +132,7 @@ public sealed class AdminOrdersController(AppDbContext dbContext) : ControllerBa
                 x.DeliveryAddress,
                 x.CustomerNote,
                 x.Total,
-                Status = x.Status.ToString(),
+                x.Status,
                 PaymentMethod = x.PaymentMethod.ToString(),
                 x.CreatedAt
             })
@@ -97,15 +154,16 @@ public sealed class AdminOrdersController(AppDbContext dbContext) : ControllerBa
             order.DeliveryAddress,
             order.CustomerNote,
             order.Total,
-            order.Status,
+            order.Status.ToString(),
             order.PaymentMethod,
             items.Count,
             order.CreatedAt,
-            items);
+            items,
+            OrderStatusTransitions.AllowedNextStatuses(order.Status).Select(status => status.ToString()).ToArray());
     }
 }
 
 public sealed record AdminOrderListItem(Guid Id, string Reference, string CustomerName, string CustomerPhone, decimal Total, string Status, string PaymentMethod, int ItemCount, DateTime CreatedAt);
-public sealed record AdminOrderDetail(Guid Id, string Reference, string CustomerName, string CustomerPhone, string DeliveryAddress, string? CustomerNote, decimal Total, string Status, string PaymentMethod, int ItemCount, DateTime CreatedAt, IReadOnlyList<AdminOrderItemDetail> Items);
+public sealed record AdminOrderDetail(Guid Id, string Reference, string CustomerName, string CustomerPhone, string DeliveryAddress, string? CustomerNote, decimal Total, string Status, string PaymentMethod, int ItemCount, DateTime CreatedAt, IReadOnlyList<AdminOrderItemDetail> Items, IReadOnlyList<string> AllowedStatuses);
 public sealed record AdminOrderItemDetail(Guid Id, Guid ProductId, string ProductName, string? ProductSku, decimal UnitPrice, int Quantity, decimal LineTotal);
-public sealed record UpdateOrderStatusRequest(string Status);
+public sealed record UpdateOrderStatusRequest(string Status, string? ExpectedStatus = null, bool ItemsReturned = false);

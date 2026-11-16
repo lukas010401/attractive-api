@@ -34,12 +34,14 @@ public sealed partial class PublicOrdersController(AppDbContext dbContext, Produ
 
         if (requestedItems.Any(x => x.Quantity > MaxQuantityPerItem)) return BadRequest(new { message = $"La quantité maximale par produit est {MaxQuantityPerItem}." });
 
-        var productIds = requestedItems.Select(x => x.ProductId).ToList();
-        var products = await dbContext.Products
-            .Where(x => productIds.Contains(x.Id))
-            .ToListAsync(cancellationToken);
+        await using var transaction = dbContext.Database.IsRelational()
+            ? await dbContext.Database.BeginTransactionAsync(cancellationToken)
+            : null;
 
-        if (products.Count != productIds.Count) return BadRequest(new { message = "Un ou plusieurs produits sont introuvables." });
+        var productIds = requestedItems.Select(x => x.ProductId).ToArray();
+        var products = await OrderStockQueries.LoadProductsForUpdateAsync(dbContext, productIds, cancellationToken);
+
+        if (products.Count != productIds.Length) return BadRequest(new { message = "Un ou plusieurs produits sont introuvables." });
 
         var unavailableProduct = products.FirstOrDefault(x => x.Status != ProductStatus.Published || x.StockQuantity <= 0);
         if (unavailableProduct is not null) return BadRequest(new { message = $"Le produit {unavailableProduct.Name} n'est plus disponible." });
@@ -84,6 +86,7 @@ public sealed partial class PublicOrdersController(AppDbContext dbContext, Produ
 
         dbContext.Orders.Add(order);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         if (products.Any(product => product.StockQuantity == 0)) showcaseCache.Invalidate();
 
         return Ok(new { order.Id, order.Reference, Status = order.Status.ToString(), PaymentMethod = order.PaymentMethod.ToString(), order.Total });
