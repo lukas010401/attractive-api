@@ -14,6 +14,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<ProductSpecification> ProductSpecifications => Set<ProductSpecification>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+    public DbSet<OrderEmailNotification> OrderEmailNotifications => Set<OrderEmailNotification>();
     public DbSet<AdminAuditLog> AdminAuditLogs => Set<AdminAuditLog>();
     public DbSet<SiteVisit> SiteVisits => Set<SiteVisit>();
 
@@ -135,6 +136,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(x => x.LineTotal).HasPrecision(18, 2);
             entity.HasOne(x => x.Order).WithMany(x => x.Items).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(x => x.Product).WithMany().HasForeignKey(x => x.ProductId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OrderEmailNotification>(entity =>
+        {
+            entity.ToTable("order_email_notifications");
+            entity.HasKey(notification => notification.Id);
+            entity.HasIndex(notification => new { notification.OrderId, notification.Recipient }).IsUnique();
+            entity.HasIndex(notification => new { notification.NextAttemptAt, notification.CreatedAt })
+                .HasFilter("\"SentAt\" IS NULL AND \"FailedAt\" IS NULL");
+            entity.Property(notification => notification.Recipient).HasMaxLength(254);
+            entity.Property(notification => notification.Payload).HasColumnType("jsonb");
+            entity.Property(notification => notification.LastErrorCode).HasMaxLength(100);
+            entity.HasOne<Order>().WithMany().HasForeignKey(notification => notification.OrderId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<AdminAuditLog>(entity =>

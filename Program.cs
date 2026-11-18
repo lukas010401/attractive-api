@@ -1,5 +1,7 @@
 ﻿using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Config;
+using AttractiveCatalog.Api.Infrastructure.Email;
+using MimeKit;
 using AttractiveCatalog.Api.Infrastructure.Catalog;
 using AttractiveCatalog.Api.Infrastructure.Media;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
@@ -23,6 +25,18 @@ builder.Logging.AddDebug();
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<FrontendOptions>(builder.Configuration.GetSection(FrontendOptions.SectionName));
 builder.Services.Configure<MediaOptions>(builder.Configuration.GetSection(MediaOptions.SectionName));
+builder.Services.AddOptions<OrderEmailOptions>()
+    .Bind(builder.Configuration.GetSection(OrderEmailOptions.SectionName))
+    .Validate(options => !options.Enabled || (!string.IsNullOrWhiteSpace(options.Host)
+        && options.Port is >= 1 and <= 65535
+        && MailboxAddress.TryParse(options.Username, out _)
+        && options.Recipients.Length > 0
+        && options.Recipients.All(recipient => MailboxAddress.TryParse(recipient, out _))
+        && Uri.TryCreate(options.AdminBaseUrl, UriKind.Absolute, out var adminUri) && adminUri.Scheme == Uri.UriSchemeHttps
+        && options.PollIntervalSeconds is >= 1 and <= 300
+        && options.BatchSize is >= 1 and <= 50
+        && options.SendTimeoutSeconds is >= 1 and <= 60), "OrderEmail configuration is invalid.")
+    .ValidateOnStart();
 
 var jwtOptions = builder.Configuration.GetSection(JwtOptions.SectionName).Get<JwtOptions>() ?? new JwtOptions();
 var frontendOptions = builder.Configuration.GetSection(FrontendOptions.SectionName).Get<FrontendOptions>() ?? new FrontendOptions();
@@ -57,6 +71,10 @@ builder.Services.AddScoped<IPasswordService, PasswordService>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IProductImageStorage, LocalProductImageStorage>();
 builder.Services.AddSingleton<ProductShowcaseCache>();
+builder.Services.AddScoped<OrderEmailQueue>();
+builder.Services.AddSingleton<IOrderEmailSender, SmtpOrderEmailSender>();
+builder.Services.AddSingleton<OrderEmailProcessor>();
+builder.Services.AddHostedService<OrderEmailWorker>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>

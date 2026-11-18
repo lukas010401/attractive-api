@@ -2,6 +2,7 @@
 using AttractiveCatalog.Api.Domain.Enums;
 using AttractiveCatalog.Api.Infrastructure.Persistence;
 using AttractiveCatalog.Api.Infrastructure.Catalog;
+using AttractiveCatalog.Api.Infrastructure.Email;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +12,7 @@ namespace AttractiveCatalog.Api.Controllers;
 
 [ApiController]
 [Route("api/orders")]
-public sealed partial class PublicOrdersController(AppDbContext dbContext, ProductShowcaseCache showcaseCache) : ControllerBase
+public sealed partial class PublicOrdersController(AppDbContext dbContext, ProductShowcaseCache showcaseCache, OrderEmailQueue emailQueue) : ControllerBase
 {
     private const int MaxCustomerNameLength = 150;
     private const int MaxCustomerPhoneLength = 30;
@@ -85,6 +86,7 @@ public sealed partial class PublicOrdersController(AppDbContext dbContext, Produ
         order.Total = order.Subtotal + order.DeliveryFee;
 
         dbContext.Orders.Add(order);
+        emailQueue.Enqueue(order, products[0].Currency);
         await dbContext.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         if (products.Any(product => product.StockQuantity == 0)) showcaseCache.Invalidate();
